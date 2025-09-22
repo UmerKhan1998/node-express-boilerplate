@@ -34,11 +34,22 @@ router.post(
 
       const { accessToken, refreshToken } = generateTokens(user._id);
 
+      // save refresh token in DB
+      user.refreshToken = refreshToken;
+      await user.save();
+
+      // send refresh token as secure cookie
+      res.cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      });
+
       res.status(201).json({
         success: true,
         message: "User registered successfully",
         accessToken,
-        refreshToken,
         user,
       });
     } catch (error) {
@@ -68,11 +79,22 @@ router.post(
 
       const { accessToken, refreshToken } = generateTokens(user._id);
 
+      // save refresh token in DB
+      user.refreshToken = refreshToken;
+      await user.save();
+
+      // send refresh token as secure cookie
+      res.cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      });
+
       res.json({
         success: true,
         message: "Login successful",
         accessToken,
-        refreshToken,
         user,
       });
     } catch (error) {
@@ -82,14 +104,14 @@ router.post(
   }
 );
 
-// Refresh token route
 router.post("/refresh", async (req, res) => {
   try {
-    const { refreshToken } = req.body;
-    if (!refreshToken)
+    const refreshToken = req.cookies.refreshToken;
+    if (!refreshToken) {
       return res
         .status(401)
-        .json({ success: false, message: "No refreshToken provided" });
+        .json({ success: false, message: "No refresh token provided" });
+    }
 
     const decoded = jwt.verify(
       refreshToken,
@@ -97,21 +119,48 @@ router.post("/refresh", async (req, res) => {
     );
     const user = await User.findById(decoded.userId);
 
-    if (!user || !user.isActive)
+    if (!user || !user.isActive || user.refreshToken !== refreshToken) {
       return res
         .status(401)
-        .json({ success: false, message: "Invalid refreshToken" });
+        .json({ success: false, message: "Invalid refresh token" });
+    }
 
+    // rotate tokens
     const { accessToken, refreshToken: newRefreshToken } = generateTokens(
       user._id
     );
+    user.refreshToken = newRefreshToken;
+    await user.save();
 
-    res.json({ success: true, accessToken, refreshToken: newRefreshToken });
+    res.cookie("refreshToken", newRefreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    res.json({ success: true, accessToken });
   } catch (error) {
     console.error("Refresh token error:", error);
     res
       .status(401)
-      .json({ success: false, message: "Invalid or expired refreshToken" });
+      .json({ success: false, message: "Invalid or expired refresh token" });
+  }
+});
+
+router.post("/logout", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (user) {
+      user.refreshToken = null;
+      await user.save();
+    }
+
+    res.clearCookie("refreshToken");
+    res.json({ success: true, message: "Logged out successfully" });
+  } catch (error) {
+    console.error("Logout error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
