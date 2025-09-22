@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken");
 const { body, validationResult } = require("express-validator");
 const User = require("../models/User");
 const auth = require("../middleware/auth");
+const { generateTokens } = require("../utils/token");
 
 const router = express.Router();
 
@@ -10,59 +11,39 @@ const router = express.Router();
 router.post(
   "/register",
   [
-    body("name")
-      .trim()
-      .isLength({ min: 2 })
-      .withMessage("Name must be at least 2 characters"),
-    body("email").isEmail().withMessage("Please enter a valid email"),
-    body("password")
-      .isLength({ min: 6 })
-      .withMessage("Password must be at least 6 characters"),
+    body("name").trim().isLength({ min: 2 }),
+    body("email").isEmail(),
+    body("password").isLength({ min: 6 }),
   ],
   async (req, res) => {
     try {
       const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          errors: errors.array(),
-        });
-      }
+      if (!errors.isEmpty())
+        return res.status(400).json({ success: false, errors: errors.array() });
 
       const { name, email, password } = req.body;
-
-      // Check if user already exists
       const existingUser = await User.findOne({ email });
-      if (existingUser) {
+      if (existingUser)
         return res.status(400).json({
           success: false,
           message: "User already exists with this email",
         });
-      }
 
-      // Create new user
       const user = new User({ name, email, password });
       await user.save();
 
-      // Generate JWT accessToken
-      const accessToken = jwt.sign(
-        { userId: user._id },
-        process.env.JWT_SECRET || "fallback-secret",
-        { expiresIn: "7d" }
-      );
+      const { accessToken, refreshToken } = generateTokens(user._id);
 
       res.status(201).json({
         success: true,
         message: "User registered successfully",
         accessToken,
+        refreshToken,
         user,
       });
     } catch (error) {
       console.error("Registration error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Server error during registration",
-      });
+      res.status(500).json({ success: false, message: "Server error" });
     }
   }
 );
@@ -70,77 +51,78 @@ router.post(
 // Login user
 router.post(
   "/login",
-  [
-    body("email").isEmail().withMessage("Please enter a valid email"),
-    body("password").exists().withMessage("Password is required"),
-  ],
+  [body("email").isEmail(), body("password").exists()],
   async (req, res) => {
     try {
       const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          errors: errors.array(),
-        });
-      }
+      if (!errors.isEmpty())
+        return res.status(400).json({ success: false, errors: errors.array() });
 
       const { email, password } = req.body;
-
-      // Find user and include password for comparison
       const user = await User.findOne({ email }).select("+password");
-      if (!user) {
-        return res.status(401).json({
-          success: false,
-          message: "Invalid credentials",
-        });
+      if (!user || !(await user.comparePassword(password))) {
+        return res
+          .status(401)
+          .json({ success: false, message: "Invalid credentials" });
       }
 
-      // Check password
-      const isPasswordValid = await user.comparePassword(password);
-      if (!isPasswordValid) {
-        return res.status(401).json({
-          success: false,
-          message: "Invalid credentials",
-        });
-      }
-
-      // Generate JWT accessToken
-      const accessToken = jwt.sign(
-        { userId: user._id },
-        process.env.JWT_SECRET || "fallback-secret",
-        { expiresIn: "7d" }
-      );
+      const { accessToken, refreshToken } = generateTokens(user._id);
 
       res.json({
         success: true,
         message: "Login successful",
         accessToken,
+        refreshToken,
         user,
       });
     } catch (error) {
       console.error("Login error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Server error during login",
-      });
+      res.status(500).json({ success: false, message: "Server error" });
     }
   }
 );
+
+// Refresh token route
+router.post("/refresh", async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken)
+      return res
+        .status(401)
+        .json({ success: false, message: "No refreshToken provided" });
+
+    const decoded = jwt.verify(
+      refreshToken,
+      process.env.JWT_REFRESH_SECRET || "fallback-refresh-secret"
+    );
+    const user = await User.findById(decoded.userId);
+
+    if (!user || !user.isActive)
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid refreshToken" });
+
+    const { accessToken, refreshToken: newRefreshToken } = generateTokens(
+      user._id
+    );
+
+    res.json({ success: true, accessToken, refreshToken: newRefreshToken });
+  } catch (error) {
+    console.error("Refresh token error:", error);
+    res
+      .status(401)
+      .json({ success: false, message: "Invalid or expired refreshToken" });
+  }
+});
 
 // Get current user
 router.get("/me", auth, async (req, res) => {
   try {
     const user = await User.findById(req.userId);
-    res.json({
-      success: true,
-      user,
-    });
+    res.json({ success: true, user });
   } catch (error) {
     console.error("Get user error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-    });
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 

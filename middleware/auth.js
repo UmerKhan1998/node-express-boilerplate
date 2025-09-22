@@ -4,12 +4,10 @@ const User = require("../models/User");
 const auth = async (req, res, next) => {
   try {
     const accessToken = req.header("Authorization")?.replace("Bearer ", "");
-
     if (!accessToken) {
-      return res.status(401).json({
-        success: false,
-        message: "No accessToken provided, authorization denied",
-      });
+      return res
+        .status(401)
+        .json({ success: false, message: "No accessToken provided" });
     }
 
     const decoded = jwt.verify(
@@ -19,10 +17,9 @@ const auth = async (req, res, next) => {
     const user = await User.findById(decoded.userId);
 
     if (!user || !user.isActive) {
-      return res.status(401).json({
-        success: false,
-        message: "accessToken is not valid",
-      });
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid accessToken" });
     }
 
     req.userId = decoded.userId;
@@ -30,10 +27,9 @@ const auth = async (req, res, next) => {
     next();
   } catch (error) {
     console.error("Auth middleware error:", error);
-    res.status(401).json({
-      success: false,
-      message: "accessToken is not valid",
-    });
+    res
+      .status(401)
+      .json({ success: false, message: "Invalid or expired accessToken" });
   }
 };
 
