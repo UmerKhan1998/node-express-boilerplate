@@ -50,8 +50,6 @@ router.post(
         success: true,
         message: "User registered successfully",
         accessToken,
-        // refreshToken,
-        user,
       });
     } catch (error) {
       console.error("Registration error:", error);
@@ -96,8 +94,6 @@ router.post(
         success: true,
         message: "Login successful",
         accessToken,
-        refreshToken,
-        // user,
       });
     } catch (error) {
       console.error("Login error:", error);
@@ -108,7 +104,7 @@ router.post(
 
 router.post("/refresh", async (req, res) => {
   try {
-    const refreshToken = req.body.refreshToken;
+    const refreshToken = req.cookies?.refreshToken;
 
     if (!refreshToken) {
       return res
