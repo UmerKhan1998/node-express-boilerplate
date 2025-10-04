@@ -30,12 +30,11 @@ router.post(
         });
 
       const user = new User({ name, email, password });
-      await user.save();
 
       const { accessToken, refreshToken } = generateTokens(user._id);
 
-      // save refresh token in DB
       user.refreshToken = refreshToken;
+
       await user.save();
 
       // send refresh token as secure cookie
